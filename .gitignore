@@ -1,6 +1,5 @@
 .DS_Store
 node_modules/
 dist/
-PhysX/
 examples/**/physx.release.js
 examples/**/physx.release.wasm
