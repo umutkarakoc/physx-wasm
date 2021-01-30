@@ -66,7 +66,16 @@ struct PxQueryFilterCallbackWrapper : public wrapper<PxQueryFilterCallback> {
 
 struct PxSimulationEventCallbackWrapper : public wrapper<PxSimulationEventCallback> {
   EMSCRIPTEN_WRAPPER(PxSimulationEventCallbackWrapper)
-  void onConstraintBreak(PxConstraintInfo *, PxU32) {}
+  void onConstraintBreak(PxConstraintInfo *constraints, PxU32 count) {
+    for(PxU32 i=0; i<count; i++)
+    {
+      PxJoint* joint = reinterpret_cast<PxJoint*>(constraints[i].externalReference);
+      PxRigidActor* actor0 = NULL;
+	    PxRigidActor* actor1 = NULL;
+      joint->getActors(actor0, actor1);
+      call<void>("onConstraintBreak", actor0, actor1);
+    }
+  }
   void onWake(PxActor **, PxU32) {}
   void onSleep(PxActor **, PxU32) {}
   void onContact(const PxContactPairHeader &, const PxContactPair *pairs, PxU32 nbPairs) {
@@ -117,6 +126,28 @@ PxFilterFlags DefaultFilterShader(
   return PxFilterFlag::eDEFAULT;
 }
 
+PxFilterFlags LayerMaskFilterShader(  
+  PxFilterObjectAttributes attributes0, PxFilterData filterData0, 
+  PxFilterObjectAttributes attributes1, PxFilterData filterData1,
+  PxPairFlags& pairFlags, const void* , PxU32 )
+{
+  if(PxFilterObjectIsTrigger(attributes0) || PxFilterObjectIsTrigger(attributes1))
+  {
+    pairFlags = PxPairFlag::eTRIGGER_DEFAULT | PxPairFlag::eDETECT_CCD_CONTACT;
+    return PxFilterFlag::eDEFAULT;
+  }
+
+  // Support collision matrix layers
+  // word0: the layer - eg 1 << 16 (16th bit 1 all others 0)
+  // word1: the mask - each active bit is a layer that collides with this
+  if(!(filterData0.word0 & filterData1.word1) && !(filterData1.word0 & filterData0.word1)) {
+    return PxFilterFlag::eSUPPRESS;
+  }
+
+  pairFlags = PxPairFlag::eCONTACT_DEFAULT | PxPairFlag::eNOTIFY_TOUCH_FOUND | PxPairFlag::eNOTIFY_TOUCH_LOST | PxPairFlag::eNOTIFY_TOUCH_PERSISTS |PxPairFlag::eDETECT_CCD_CONTACT;
+  return PxFilterFlag::eDEFAULT;
+}
+
 // TODO: Getting the  global PxDefaultSimulationFilterShader into javascript
 // is problematic, so let's provide this custom factory function for now
 
@@ -125,7 +156,7 @@ PxSceneDesc *getDefaultSceneDesc(PxTolerancesScale &scale, int numThreads, PxSim
   PxSceneDesc *sceneDesc = new PxSceneDesc(scale);
   sceneDesc->gravity = PxVec3(0.0f, -9.81f, 0.0f);
   sceneDesc->cpuDispatcher = PxDefaultCpuDispatcherCreate(numThreads);
-  sceneDesc->filterShader = DefaultFilterShader;
+  sceneDesc->filterShader = LayerMaskFilterShader;
   sceneDesc->simulationEventCallback = callback;
   sceneDesc->kineKineFilteringMode = PxPairFilteringMode::eKEEP;
   sceneDesc->staticKineFilteringMode = PxPairFilteringMode::eKEEP;
@@ -195,8 +226,6 @@ EMSCRIPTEN_BINDINGS(physx)
   function("createConvexMesh", &createConvexMesh, allow_raw_pointers());
   function("createConvexMeshFromBuffer", &createConvexMeshFromBuffer, allow_raw_pointers());
 
-  
-
 
   class_<PxSimulationEventCallback>("PxSimulationEventCallback")
       .allow_subclass<PxSimulationEventCallbackWrapper>("PxSimulationEventCallbackWrapper");
@@ -210,7 +239,7 @@ EMSCRIPTEN_BINDINGS(physx)
   function("PxD6JointCreate", &PxD6JointCreate, allow_raw_pointers());
 
   class_<PxJoint>("PxJoint")
-      .function("release", &PxJoint::release, allow_raw_pointers())
+      .function("release", &PxJoint::release)
       .function("setBreakForce", &PxJoint::setBreakForce, allow_raw_pointers())
       .function("setConstraintFlags", &PxJoint::setConstraintFlags, allow_raw_pointers())
       .function("setConstraintFlag", &PxJoint::setConstraintFlag, allow_raw_pointers())
@@ -218,10 +247,9 @@ EMSCRIPTEN_BINDINGS(physx)
       .function("setInvInertiaScale0", &PxJoint::setInvInertiaScale0, allow_raw_pointers())
       .function("setInvMassScale1", &PxJoint::setInvMassScale1, allow_raw_pointers())
       .function("setInvInertiaScale1", &PxJoint::setInvInertiaScale1, allow_raw_pointers());
-      
   class_<PxSphericalJoint, base<PxJoint>>("PxSphericalJoint");
   class_<PxRevoluteJoint, base<PxJoint>>("PxRevoluteJoint")
-    .function("getAngle", &PxRevoluteJoint::getAngle)
+  .function("getAngle", &PxRevoluteJoint::getAngle)
     .function("getVelocity", &PxRevoluteJoint::getVelocity, allow_raw_pointers())
     .function("setLimit", &PxRevoluteJoint::setLimit, allow_raw_pointers())
     .function("getLimit", &PxRevoluteJoint::getLimit)
@@ -234,8 +262,7 @@ EMSCRIPTEN_BINDINGS(physx)
     .function("setProjectionLinearTolerance", &PxRevoluteJoint::setProjectionLinearTolerance, allow_raw_pointers())
     .function("getProjectionLinearTolerance", &PxRevoluteJoint::getProjectionLinearTolerance)
     .function("getProjectionAngularTolerance", &PxRevoluteJoint::getProjectionAngularTolerance)
-    .function("setProjectionAngularTolerance", &PxRevoluteJoint::setProjectionAngularTolerance, allow_raw_pointers())
-    ;
+    .function("setProjectionAngularTolerance", &PxRevoluteJoint::setProjectionAngularTolerance, allow_raw_pointers());
   class_<PxFixedJoint, base<PxJoint>>("PxFixedJoint");
   class_<PxDistanceJoint, base<PxJoint>>("PxDistanceJoint");
   class_<PxPrismaticJoint, base<PxJoint>>("PxPrismaticJoint");
@@ -404,8 +431,7 @@ EMSCRIPTEN_BINDINGS(physx)
       .function("getSphereGeometry", &PxShape::getSphereGeometry, allow_raw_pointers())
       .function("getPlaneGeometry", &PxShape::getPlaneGeometry, allow_raw_pointers())
       .function("setSimulationFilterData", &PxShape::setSimulationFilterData, allow_raw_pointers())
-      .function("getSimulationFilterData", &PxShape::getSimulationFilterData, allow_raw_pointers())
-      .function("setQueryFilterData", &PxShape::setQueryFilterData, allow_raw_pointers())
+      .function("setQueryFilterData", &PxShape::setQueryFilterData)
       .function("getQueryFilterData", &PxShape::getQueryFilterData, allow_raw_pointers())
       .function("setMaterials", optional_override(
                                     [](PxShape &shape, std::vector<PxMaterial *> materials) {
@@ -425,6 +451,7 @@ EMSCRIPTEN_BINDINGS(physx)
 
   class_<PxShapeFlags>("PxShapeFlags").constructor<int>()
     .function("isSet", &PxShapeFlags::isSet);
+  
   enum_<PxShapeFlag::Enum>("PxShapeFlag")
       .value("eSIMULATION_SHAPE", PxShapeFlag::Enum::eSIMULATION_SHAPE)
       .value("eSCENE_QUERY_SHAPE", PxShapeFlag::Enum::eSCENE_QUERY_SHAPE)
@@ -439,17 +466,17 @@ EMSCRIPTEN_BINDINGS(physx)
 
   class_<PxCooking>("PxCooking")
       .function("createConvexMesh", optional_override(
-              [](PxCooking& cooking, std::vector<PxVec3>& vertices, PxPhysics& physics) {
-                return createConvexMesh(vertices, cooking, physics);
-              }), allow_raw_pointers())
+                                        [](PxCooking& cooking, std::vector<PxVec3>& vertices, PxPhysics& physics) {
+                                          return createConvexMesh(vertices, cooking, physics);
+                                        }), allow_raw_pointers())
       .function("createConvexMeshFromBuffer", optional_override(
-              [](PxCooking& cooking, int vertices, PxU32 vertCount, PxPhysics& physics) {
-                return createConvexMeshFromBuffer(vertices, vertCount, cooking, physics);
-              }), allow_raw_pointers())
+                                        [](PxCooking& cooking, int vertices, PxU32 vertCount, PxPhysics& physics) {
+                                          return createConvexMeshFromBuffer(vertices, vertCount, cooking, physics);
+                                        }), allow_raw_pointers())
       .function("createTriMesh", optional_override(
-              [](PxCooking& cooking, int vertices, PxU32 vertCount, int indices, PxU32 indexCount, bool isU16, PxPhysics& physics) {
-                return createTriMesh(vertices, vertCount, indices, indexCount, isU16, cooking, physics);
-              }), allow_raw_pointers());
+                                        [](PxCooking& cooking, int vertices, PxU32 vertCount, int indices, PxU32 indexCount, bool isU16, PxPhysics& physics) {
+                                          return createTriMesh(vertices, vertCount, indices, indexCount, isU16, cooking, physics);
+                                        }), allow_raw_pointers());
   class_<PxCookingParams>("PxCookingParams").constructor<PxTolerancesScale>();
   class_<PxCpuDispatcher>("PxCpuDispatcher");
   class_<PxBVHStructure>("PxBVHStructure");
@@ -622,6 +649,8 @@ EMSCRIPTEN_BINDINGS(physx)
       .function("move", &PxController::move, allow_raw_pointers())
       .function("setPosition", &PxController::setPosition)
       .function("getPosition", &PxController::getPosition)
+      .function("setFootPosition", &PxController::setFootPosition)
+      .function("getFootPosition", &PxController::getFootPosition)
       .function("setSimulationFilterData", optional_override(
           [](PxController &ctrl, PxFilterData &data) {
             PxRigidDynamic* actor = ctrl.getActor();

@@ -3,3 +3,5 @@ node_modules/
 dist/
 examples/**/physx.release.js
 examples/**/physx.release.wasm
+**/Progress/**
+**/documentation/**

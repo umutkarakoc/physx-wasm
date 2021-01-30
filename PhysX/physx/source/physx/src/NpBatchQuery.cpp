@@ -366,7 +366,7 @@ void NpBatchQuery::execute()
 		return;
 	}
 
-	PxU32 hitsSpaceLeft=0; PX_UNUSED(hitsSpaceLeft);
+	PxU32 hitsSpaceLeft = 0; PX_UNUSED(hitsSpaceLeft);
 
 	// ====================== parse and execute the batch query memory stream ====================== 
 	PxU32 queryCount = 0;
